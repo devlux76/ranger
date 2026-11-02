@@ -1,16 +1,14 @@
 #!/bin/sh
-# Install ranger and scout for Claude and for the agents' skills directory.
+# Install ranger for Claude and the agents; Scout has its own source repository.
 #
-# scout is the retrieval layer (scout.py with index.py and
-# trailblazer.py, no model); ranger adds the model on top. Each install directory
-# gets the code it runs and a SKILL.md rendered from its template, with
-# @SKILL_DIR@ standing for the install path. Run it from the ranger repository;
-# it never touches anything else.
+# Retrieval helpers come from ~/projects/scout. Scout's installed skill paths
+# link to that repository and are maintained independently of this installer.
 
 set -eu
 
 SRC=$(cd "$(dirname "$0")" && pwd)
-RETRIEVAL="$SRC/index.py $SRC/trailblazer.py $SRC/scout.py"
+SCOUT_SRC="$HOME/projects/scout"
+RETRIEVAL="$SCOUT_SRC/index.py $SCOUT_SRC/trailblazer.py $SCOUT_SRC/scout.py"
 
 for ROOT in "$HOME/.claude/skills" "$HOME/.agents/skills"; do
     DIR="$ROOT/ranger"
@@ -21,13 +19,6 @@ for ROOT in "$HOME/.claude/skills" "$HOME/.agents/skills"; do
     sed "s|@SKILL_DIR@|$DIR|g" "$SRC/SKILL.md.in" > "$DIR/SKILL.md"
     echo "installed $DIR"
 
-    DIR="$ROOT/scout"
-    mkdir -p "$DIR"
-    # shellcheck disable=SC2086
-    cp $RETRIEVAL "$DIR/"
-    rm -f "$DIR/Modelfile" "$DIR/ranger.py"  # the old 1.2B agent loop
-    sed "s|@SKILL_DIR@|$DIR|g" "$SRC/scout.SKILL.md.in" > "$DIR/SKILL.md"
-    echo "installed $DIR"
-    # The old name; leaving it would list a stale second copy of the skill.
+    # Keep removing the retired skill name during upgrades.
     if [ -d "$ROOT/mini-ranger" ]; then rm -rf "$ROOT/mini-ranger"; echo "removed $ROOT/mini-ranger"; fi
 done
