@@ -317,7 +317,11 @@ class TrailblazerClientTests(unittest.TestCase):
             text, appendix = ranger.index_candidates(str(self.repo), "head bob", False)
         self.assertIn("assets/headBob.ts:10-24", text)
         self.assertIn("headBob", appendix)
-        self.assertNotIn("uses:", text.split("Exact-name")[0].split("10-24")[0])  # no graph of its own
+        # The block AFTER the label: a graph note would be printed there, so
+        # assert on the text that follows the range label, not the text before it.
+        block = text.split("assets/headBob.ts:10-24", 1)[1].split("\n\n", 1)[0]
+        for label in ("defines:", "imports:", "imported by:", "uses:"):
+            self.assertNotIn(label, block)  # no graph of its own
 
     def test_index_candidates_falls_back_to_its_own_index(self):
         calls = []
