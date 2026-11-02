@@ -25,11 +25,14 @@ import time
 import uuid
 from pathlib import Path
 
+# The skill that is running (scout or ranger share this module); names its messages.
+PROG = Path(sys.argv[0]).stem if Path(sys.argv[0]).stem in ("scout", "ranger") else "ranger"
+
 import httpx
 
 try:
     import trailblazer
-except ImportError:  # mini-ranger ships index.py without the client
+except ImportError:  # scout ships index.py without the client
     trailblazer = None
 
 EMBED_URL = "http://127.0.0.1:8091/v1/embeddings"
@@ -268,7 +271,7 @@ def sync(work_dir, verbose=False):
             print(f"ranger index: embedding {len(pending)} chunks from {len(todo)} files", file=sys.stderr)
         # Chunks still owed per file. When a file's last chunk has landed the file
         # goes into the manifest, which is saved as the run proceeds, so a run that
-        # is stopped (to yield the inference lock, say) resumes where it left off.
+        # is interrupted (a crash, or Ctrl-C) resumes where it left off.
         owed = {}
         for rel, _, _, _ in pending:
             owed[rel] = owed.get(rel, 0) + 1
@@ -446,7 +449,7 @@ def main():
                 for h in hits:
                     print(f"{h['score']:.3f}  {h['path']}:{h['start']}-{h['end']}")
                 return
-            print("ranger: trailblazer watches the repo but has no hits for this question "
+            print(f"{PROG}: trailblazer watches the repo but has no hits for this question "
                   "(vectors still building, or its search failed); using ranger's own index",
                   file=sys.stderr)
 

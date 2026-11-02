@@ -1,12 +1,12 @@
 ---
 name: ranger
-description: A local LFM2.5-2.6B model that answers deeper questions about a codebase - how something works, why it breaks, what a change affects - by taking mini-ranger's candidate locations and graph, reranking them and verifying with Grep/Glob/Read (plus Trailblazer's Where/Uses), and reporting file paths and line numbers. Use when mini-ranger's locations alone do not answer the question. Saves token costs by offloading analysis to free local inference.
+description: A local LFM3-1.7B model that answers deeper questions about a codebase - how something works, why it breaks, what a change affects - by taking scout's candidate locations and graph, reranking them and verifying with Grep/Glob/Read (plus Trailblazer's Where/Uses), and reporting file paths and line numbers. Use when scout's locations alone do not answer the question. Saves token costs by offloading analysis to free local inference.
 allowed-tools: Bash(python3 *ranger/ranger.py*)
 ---
 
 # ranger
 
-A local LFM2.5-2.6B model analyses the codebase on your behalf. It starts from mini-ranger's output — candidate locations and the code graph, from Trailblazer when it watches the repo or from ranger's own index otherwise — reranks and verifies them with Grep/Glob/Read, and reports back its findings: file paths, line numbers, and a short summary. **Run mini-ranger first; use ranger when the locations alone do not answer the question.**
+A local LFM3-1.7B model analyses the codebase on your behalf. It starts from scout's output — candidate locations and the code graph, from Trailblazer when it watches the repo or from ranger's own index otherwise — reranks and verifies them with Grep/Glob/Read, and reports back its findings: file paths, line numbers, and a short summary. **Run scout first; use ranger when the locations alone do not answer the question.**
 
 ## When to use
 
@@ -22,7 +22,7 @@ A local LFM2.5-2.6B model analyses the codebase on your behalf. It starts from m
 - Single obvious grep in one known file
 - Pure write/generate task with zero exploration needed
 - The answer is already in Trailblazer (`trailblazer where`, `uses`, `impact`, `search`): those are faster and free
-- mini-ranger's locations already answer it
+- scout's locations already answer it
 
 ## Usage
 
@@ -39,7 +39,7 @@ python3 @SKILL_DIR@/ranger.py -C <repo> -q "<question>" --max-turns 20
 
 ## What to expect
 
-- **Retrieval is mini-ranger's.** The candidates and graph are exactly what `mini_ranger.py` prints (see the mini-ranger skill): Trailblazer's graph and vectors when it watches the repo — started, and asked to watch, when needed — otherwise ranger's own index. With `--verbose` the line `candidates from trailblazer` or `candidates from index` says which.
+- **Retrieval is scout's.** The candidates and graph are exactly what `scout.py` prints (see the scout skill): Trailblazer's graph and vectors when it watches the repo — started, and asked to watch, when needed — otherwise ranger's own index. With `--verbose` the line `candidates from trailblazer` or `candidates from index` says which.
 - **Graph tools.** Where Trailblazer watches the repo the model also gets `Where` (where a name is declared) and `Uses` (every definition that uses it), which are exact where Grep is not.
 - **Time per question** (measured 2026-10-03, CPU only, 6 threads): roughly 2 to 7 minutes; 3 of 3 test questions answered correctly with file and line.
 
@@ -55,4 +55,4 @@ docker start ranger-qdrant                                        # index store 
 systemctl --user start trailblazer                                  # the code graph (ranger starts it itself when it is stopped)
 ```
 
-Models are in `~/models`; the server binary is `~/vendor/llama.cpp/build-fresh`. ranger's source is `~/projects/ranger` — changes go there and are installed from there (`install.sh` installs ranger and mini-ranger into `~/.claude/skills` and `~/.agents/skills`), never by hand. If it is still broken after that, report it to the project lead instead of changing anything.
+Models are in `~/models`; the server binary is `~/vendor/llama.cpp/build-fresh`. ranger's source is `~/projects/ranger` — changes go there and are installed from there (`install.sh` installs ranger and scout into `~/.claude/skills` and `~/.agents/skills`), never by hand. If it is still broken after that, report it to the project lead instead of changing anything.

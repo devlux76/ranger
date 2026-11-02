@@ -32,6 +32,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The skill that is running (scout or ranger share this module); names its messages.
+PROG = Path(sys.argv[0]).stem if Path(sys.argv[0]).stem in ("scout", "ranger") else "ranger"
+
 import httpx
 
 STATE_DIR_ENV = "TRAILBLAZER_STATE_DIR"
@@ -131,7 +134,7 @@ def start_service():
     """
     active = subprocess.run(["systemctl", "--user", "is-active", "--quiet", SERVICE])
     if active.returncode == 0:
-        print("ranger: Trailblazer is running but not answering; leaving it alone", file=sys.stderr)
+        print(f"{PROG}: Trailblazer is running but not answering; leaving it alone", file=sys.stderr)
         return False
     folder = state_dir()
     try:
@@ -141,24 +144,31 @@ def start_service():
              "-t", str(START_BACKSTOP_S), str(folder)],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     except OSError as e:
-        print(f"ranger: cannot wait for Trailblazer ({e}); not starting it", file=sys.stderr)
+        print(f"{PROG}: cannot wait for Trailblazer ({e}); not starting it", file=sys.stderr)
         return False
+    setup = []
     for line in waiter.stderr:
+        setup.append(line)
         if "Watches established" in line:
             break
     else:
         waiter.wait()
-        print("ranger: cannot wait for Trailblazer (inotifywait gave up); not starting it", file=sys.stderr)
+        # inotifywait's own words first: "Too many open files" is the host's
+        # inotify instance limit, and only the operator can raise it.
+        detail = "".join(setup).strip() or "inotifywait said nothing"
+        print(f"{PROG}: cannot wait for Trailblazer (inotifywait could not set up its watches: "
+              f"{detail}); not starting it; raise fs.inotify.max_user_instances if it ran out",
+              file=sys.stderr)
         return False
-    print("ranger: starting Trailblazer", file=sys.stderr)
+    print(f"{PROG}: starting Trailblazer", file=sys.stderr)
     started = subprocess.run(["systemctl", "--user", "start", SERVICE])
     if started.returncode != 0:
         waiter.kill()
         waiter.wait()
-        print("ranger: Trailblazer did not start (systemctl failed)", file=sys.stderr)
+        print(f"{PROG}: Trailblazer did not start (systemctl failed)", file=sys.stderr)
         return False
     if waiter.wait() != 0:
-        print(f"ranger: anomaly: Trailblazer started but published no endpoint within "
+        print(f"{PROG}: anomaly: Trailblazer started but published no endpoint within "
               f"{START_BACKSTOP_S}s; see journalctl --user -u {SERVICE}", file=sys.stderr)
         return False
     return True
@@ -173,7 +183,7 @@ def ensure_watched(work_dir):
     if status is None and start_service():
         status = call("status", body)
     if status is NOT_WATCHED:
-        print("ranger: Trailblazer does not watch this repository; asking it to", file=sys.stderr)
+        print(f"{PROG}: Trailblazer does not watch this repository; asking it to", file=sys.stderr)
         if watch(work_dir):
             status = call("status", body)
     if not isinstance(status, dict) or status.get("error"):
@@ -196,10 +206,18 @@ def node_line(node):
 
 
 def edge_line(edge):
-    """One use as 'path:line qualified (kind[, uncertain])'."""
+    """One use as 'path:line qualified (kind[, uncertain][, provenance])'.
+
+    Provenance says how the graph inferred an edge it could not resolve
+    directly, e.g. Trailblazer's 'default_module' for a call through an
+    injected module (`mod(st, :workspace, Workspace)`); it is kept so such an
+    edge is never read as a definite call."""
     kind = edge.get("kind") or "uses"
     if edge.get("uncertain"):
         kind += ", uncertain"
+    provenance = edge.get("provenance")
+    if isinstance(provenance, str) and provenance.strip():
+        kind += ", " + provenance.strip().replace("_", " ")
     return f"{edge.get('node', {}).get('path')}:{edge.get('line')} {edge.get('node', {}).get('qualified')} ({kind})"
 
 

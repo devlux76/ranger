@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""ranger — codebase exploration via LFM2.5-2.6B on a local llama-server.
+"""ranger — codebase exploration via LFM3-1.7B on a local llama-server.
 
-Delegates code search to a local LFM2.5 model. Asks for candidate locations
+Delegates code search to a local LFM3 model. Asks for candidate locations
 first — from Trailblazer's definition graph and vectors when it watches the
 repository, otherwise from ranger's own semantic index (index.py) — then lets
 the model verify them with Grep/Glob/Read through the OpenAI-compatible endpoint
@@ -25,12 +25,12 @@ from pathlib import Path
 import httpx
 
 # The retrieval layer: candidate locations and the graph, no model.
-from mini_ranger import UNSET, index_candidates, skill_modules, trailblazer_ready, trailblazer_status  # noqa: F401
+from scout import UNSET, index_candidates, skill_modules, trailblazer_ready, trailblazer_status  # noqa: F401
 
 # Mirai's llama.cpp router (user service mirai-llama-router): one copy of each
 # model in memory, shared with her agent.
 SERVER_URL = "http://127.0.0.1:8094"
-MODEL = "lfm2.5-2.6b:q4"
+MODEL = "lfm3-1.7b:q8"
 MAX_TURNS = 100
 TOOL_TIMEOUT = 10
 MAX_TOOL_OUTPUT = 8000
@@ -40,8 +40,33 @@ GRAPH_UNAVAILABLE = "the definition graph is unavailable right now; use Grep ins
 
 # --- Tools ---
 
-def tool_grep(pattern, path=".", output_mode="files_with_matches", context=0, head_limit=0, **kw):
-    cmd = ["rg", pattern, "--heading", "--color", "never"]
+def _rg_output(out):
+    """What a finished rg run contributes to the tool's answer.
+
+    exit 0 is the plain answer; exit 1 is rg's own "nothing matched". exit 2
+    means some input could not be read — but rg already printed everything it
+    found on stdout, and that must not be replaced by the error text: the
+    matches are what the caller asked for, the errors only qualify them.
+    """
+    if out.returncode == 0:
+        return out.stdout
+    if out.returncode == 1:
+        return ""
+    if out.stdout:
+        errors = out.stderr.strip()
+        note = f"\n... ({errors.splitlines()[0][:200]})" if errors else ""
+        return out.stdout.rstrip("\n") + note
+    return out.stderr
+
+
+def tool_grep(pattern, path=".", output_mode="files_with_matches", context=0, head_limit=0,
+              work_dir=None, **kw):
+    # An omitted, empty or relative path must resolve under the -C repository,
+    # not under wherever the ranger process happens to run: rg is given work_dir
+    # as its cwd, so "." and a relative path both land there, while an absolute
+    # path is unaffected by cwd. -e keeps a dash-led pattern from being read as
+    # an rg flag.
+    cmd = ["rg", "-e", pattern, "--heading", "--color", "never"]
     if output_mode == "files_with_matches":
         cmd.append("--files-with-matches")
     elif output_mode == "content":
@@ -53,8 +78,8 @@ def tool_grep(pattern, path=".", output_mode="files_with_matches", context=0, he
     if path:
         cmd.append(path)
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT)
-        result = out.stdout if out.returncode == 0 else out.stderr
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT, cwd=work_dir)
+        result = _rg_output(out)
     except subprocess.TimeoutExpired:
         return "Grep timed out"
     if head_limit:
@@ -62,15 +87,16 @@ def tool_grep(pattern, path=".", output_mode="files_with_matches", context=0, he
     return result[:MAX_TOOL_OUTPUT] or "No matches found"
 
 
-def tool_glob(pattern, directory=".", **kw):
+def tool_glob(pattern, directory=".", work_dir=None, **kw):
+    # Same cwd rule as tool_grep: omitted or relative directory means work_dir.
     cmd = ["rg", "--files", "--glob", pattern,
            "--glob", "!**/node_modules/**", "--glob", "!**/.git/**",
            "--glob", "!**/build/**", "--glob", "!**/dist/**"]
     if directory:
         cmd.append(directory)
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT)
-        result = out.stdout if out.returncode == 0 else out.stderr
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT, cwd=work_dir)
+        result = _rg_output(out)
     except subprocess.TimeoutExpired:
         return "Glob timed out"
     lines = result.splitlines()
@@ -80,8 +106,15 @@ def tool_glob(pattern, directory=".", **kw):
     return "\n".join(lines) if lines else "No files found"
 
 
-def tool_read(path, offset=1, limit=150, **kw):
+def tool_read(path, offset=1, limit=150, work_dir=None, **kw):
+    if offset < 1:
+        # A line range starts at 1: 0 or a negative offset is the first line,
+        # never "0|..." and never a range wrapping around the end of the file.
+        offset = 1
     p = Path(path)
+    if work_dir and not p.is_absolute():
+        # A relative path is under the -C repository, wherever the process runs.
+        p = Path(work_dir) / p
     if not p.exists():
         return f"Error: {path} does not exist"
     if not p.is_file():
@@ -182,7 +215,7 @@ GRAPH_TOOL_DEFS = [
         "type": "function",
         "function": {
             "name": "Uses",
-            "description": "Ask the repository's definition graph every definition that uses a name, as path:line qualified (kind), where kind is calls, references, imports, tests or aliases, marked 'uncertain' when the graph could not settle which definition the reference means. Use it before calling two similarly named symbols related or independent.",
+            "description": "Ask the repository's definition graph every definition that uses a name, as path:line qualified (kind), where kind is calls, references, imports, tests or aliases, marked 'uncertain' when the graph could not settle which definition the reference means, followed by how it was inferred when the graph says (e.g. 'default module': a call through an injected module). Use it before calling two similarly named symbols related or independent.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -232,7 +265,7 @@ def build_system_prompt(work_dir, graph_tools=False):
         "- The repository has a definition graph: Where NAME says where a name is declared "
         "(path:start-end) and Uses NAME lists every definition that uses it with its line and "
         "the kind of use. Prefer those over Grep for 'where is X defined' and 'what uses X'; "
-        "check an edge marked uncertain before relying on it.\n"
+        "check an edge marked uncertain before relying on it, and report its qualifier with it.\n"
         if graph_tools else ""
     )
     return (
@@ -285,8 +318,10 @@ def parse_tool_calls_from_content(content):
         return []
     raw = match.group(1)
     calls = []
-    for part in re.split(r"\)\s*,\s*(?=[A-Z])", raw):
-        part = part.strip().rstrip(")")
+    # Split between calls on ", " after a ")" — the ")" stays with the call it
+    # closes, so each part is a whole "Name(args)" for the match below.
+    for part in re.split(r"(?<=\))\s*,\s*(?=[A-Z])", raw):
+        part = part.strip()
         if not part:
             continue
         m = re.match(r"(\w+)\((.*)\)", part, re.DOTALL)
@@ -327,18 +362,16 @@ def run_tool(name, args, work_dir, functions=None):
                 break
     if not fn:
         return f"Error: unknown tool '{name}'"
-    if "path" in args and not args["path"]:
-        args["path"] = work_dir
-    if "directory" in args and not args["directory"]:
-        args["directory"] = work_dir
+    # The tools resolve their own paths under work_dir (the graph tools take it
+    # in **kw); no argument is rewritten here.
     try:
-        return fn(**args)
+        return fn(**args, work_dir=work_dir)
     except Exception as e:
         return f"Error executing {name}: {e}"
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Explore a codebase using local LFM2.5")
+    parser = argparse.ArgumentParser(description="Explore a codebase using local LFM3")
     parser.add_argument("-C", "--directory", default=".", help="Repository directory")
     parser.add_argument("-q", "--query", required=True, help="Question about the codebase")
     parser.add_argument("--max-turns", type=int, default=MAX_TURNS, help="Max exploration turns")

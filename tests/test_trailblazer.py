@@ -25,7 +25,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 import index           # noqa: E402
-import mini_ranger     # noqa: E402
+import scout     # noqa: E402
 import ranger          # noqa: E402
 import trailblazer     # noqa: E402
 
@@ -155,6 +155,25 @@ def exploding_sync(*args, **kwargs):
     raise AssertionError("index.sync must not run when Trailblazer watches the repo")
 
 
+class FakeWaiter:
+    """Stands in for the inotifywait process: stderr lines, then an exit code.
+
+    The waiter is what start_service() watches for "Watches established", so a
+    fake yields that line (or fails before it) and wait() returns at once: no
+    real inotify, no real backstop sleep, whatever the host's limits allow."""
+
+    def __init__(self, lines, wait_code=0):
+        self.stderr = iter(lines)
+        self.wait_code = wait_code
+        self.killed = False
+
+    def wait(self):
+        return self.wait_code
+
+    def kill(self):
+        self.killed = True
+
+
 class TrailblazerClientTests(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
@@ -252,6 +271,27 @@ class TrailblazerClientTests(unittest.TestCase):
         self.assertIn("assets/stepBob.ts:42", text)
         self.assertIn("uncertain", text)
 
+    def test_an_edge_keeps_its_uncertainty_and_provenance(self):
+        edge = {"node": STEP_BOB, "kind": "calls", "line": 42,
+                "uncertain": True, "provenance": "default_module"}
+        self.assertEqual(trailblazer.edge_line(edge),
+                         "assets/stepBob.ts:42 stepBob (calls, uncertain, default module)")
+
+    def test_an_edge_without_provenance_renders_as_before(self):
+        self.assertEqual(trailblazer.edge_line(USES_RESULT[0]),
+                         "assets/stepBob.ts:42 stepBob (calls, uncertain)")
+        self.assertEqual(trailblazer.edge_line(USES_RESULT[1]),
+                         "assets/headBob.ts:18 bobOffset (references)")
+
+    def test_structure_text_preserves_provenance_from_the_graph(self):
+        uses = [dict(USES_RESULT[0], provenance="default_module")]
+        url, _server = self.serve(lambda op, body: (200, uses) if op == "uses"
+                                  else watched_answer(op, body))
+        self.write_endpoint(url)
+        hits = trailblazer.search_hits(self.repo, "head bob")
+        text = trailblazer.structure_text(self.repo, hits, "head bob")
+        self.assertIn("(calls, uncertain, default module)", text)
+
     def test_structure_text_reports_named_symbols(self):
         url, _server = self.serve()
         self.write_endpoint(url)
@@ -317,7 +357,11 @@ class TrailblazerClientTests(unittest.TestCase):
             text, appendix = ranger.index_candidates(str(self.repo), "head bob", False)
         self.assertIn("assets/headBob.ts:10-24", text)
         self.assertIn("headBob", appendix)
-        self.assertNotIn("uses:", text.split("Exact-name")[0].split("10-24")[0])  # no graph of its own
+        # The block AFTER the label: a graph note would be printed there, so
+        # assert on the text that follows the range label, not the text before it.
+        block = text.split("assets/headBob.ts:10-24", 1)[1].split("\n\n", 1)[0]
+        for label in ("defines:", "imports:", "imported by:", "uses:"):
+            self.assertNotIn(label, block)  # no graph of its own
 
     def test_index_candidates_falls_back_to_its_own_index(self):
         calls = []
@@ -487,6 +531,8 @@ class TrailblazerClientTests(unittest.TestCase):
     def test_ensure_watched_starts_a_stopped_service_on_its_endpoint_event(self):
         # The service publishes endpoint.json by rename once its API listens; the
         # wait is on that event, so the status asked right after it is answered.
+        # The waiter itself is faked: no real inotifywait, so the test passes
+        # whatever the host's inotify instance limit allows.
         url, server = self.serve()
         runs = []
 
@@ -499,7 +545,9 @@ class TrailblazerClientTests(unittest.TestCase):
             temp.rename(self.state / "endpoint.json")
             return subprocess.CompletedProcess(argv, 0)
 
+        waiter = FakeWaiter(["Setting up watches.\n", "Watches established.\n"], wait_code=0)
         with mock.patch.object(trailblazer.subprocess, "run", systemctl), \
+             mock.patch.object(trailblazer.subprocess, "Popen", lambda *a, **k: waiter), \
              contextlib.redirect_stderr(io.StringIO()):
             status = trailblazer.ensure_watched(str(self.repo))
         self.assertEqual([argv[2] for argv in runs], ["is-active", "start"])
@@ -507,14 +555,41 @@ class TrailblazerClientTests(unittest.TestCase):
         self.assertEqual([op for op, _ in server.calls], ["status"])
 
     def test_a_start_that_publishes_nothing_fires_the_backstop(self):
+        # The backstop is faked too: the waiter's wait() returns nonzero at once
+        # instead of blocking for the real START_BACKSTOP_S.
         def systemctl(argv, **kw):
             return subprocess.CompletedProcess(argv, 3 if argv[2] == "is-active" else 0)
 
+        waiter = FakeWaiter(["Setting up watches.\n", "Watches established.\n"], wait_code=1)
         with mock.patch.object(trailblazer.subprocess, "run", systemctl), \
+             mock.patch.object(trailblazer.subprocess, "Popen", lambda *a, **k: waiter), \
              mock.patch.object(trailblazer, "START_BACKSTOP_S", 1), \
              contextlib.redirect_stderr(io.StringIO()) as err:
             self.assertIsNone(trailblazer.ensure_watched(str(self.repo)))
         self.assertIn("anomaly", err.getvalue())
+
+    def test_a_waiter_that_cannot_set_up_says_why_and_does_not_start(self):
+        # inotifywait gives up when its instances are exhausted: its own stderr
+        # must reach the operator, with the limit to raise, and the service
+        # stays stopped — the operator decides, not the script.
+        runs = []
+
+        def systemctl(argv, **kw):
+            runs.append(argv)
+            return subprocess.CompletedProcess(argv, 3 if argv[2] == "is-active" else 0)
+
+        waiter = FakeWaiter(["Setting up watches.\n",
+                             "Couldn't initialize inotify: Too many open files\n"],
+                            wait_code=1)
+        with mock.patch.object(trailblazer.subprocess, "run", systemctl), \
+             mock.patch.object(trailblazer.subprocess, "Popen", lambda *a, **k: waiter), \
+             contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertFalse(trailblazer.start_service())
+            self.assertIsNone(trailblazer.ensure_watched(str(self.repo)))
+        message = err.getvalue()
+        self.assertIn("Couldn't initialize inotify: Too many open files", message)
+        self.assertIn("fs.inotify.max_user_instances", message)
+        self.assertEqual([argv[2] for argv in runs], ["is-active", "is-active"])  # never started
 
     def test_a_search_slowed_by_indexing_still_answers(self):
         # Trailblazer's own embedding backlog delays a search past the plain
@@ -531,20 +606,79 @@ class TrailblazerClientTests(unittest.TestCase):
             hits = trailblazer.search_hits(str(self.repo), "head bob")
         self.assertIn("assets/headBob.ts", [h["path"] for h in hits])
 
-    # --- mini_ranger.py's command line: retrieval only, no model ---
+    # --- scout.py's command line: retrieval only, no model ---
 
-    def test_mini_ranger_prints_candidates_and_structure_without_a_model(self):
+    def test_scout_prints_candidates_and_structure_without_a_model(self):
         url, _server = self.serve()
         self.write_endpoint(url)
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.no_systemctl(), \
              mock.patch.object(index, "sync", exploding_sync), \
              mock.patch.object(ranger, "call_model", side_effect=AssertionError("no model")), \
-             mock.patch.object(sys, "argv", ["mini_ranger.py", "-C", str(self.repo), "-q", "head bob"]):
-            mini_ranger.main()
+             mock.patch.object(sys, "argv", ["scout.py", "-C", str(self.repo), "-q", "head bob"]):
+            scout.main()
         self.assertIn("--- candidates, best match first ---", out.getvalue())
         self.assertIn("assets/headBob.ts:10-24", out.getvalue())
         self.assertIn("--- structure ---", out.getvalue())
+
+    def test_scout_exits_1_when_no_index_source_can_answer(self):
+        # No endpoint file, so Trailblazer cannot watch; ranger's own index
+        # raises, so it cannot answer either: nothing could answer, and the
+        # message must say that rather than claiming two false facts.
+        err = io.StringIO()
+        inactive = subprocess.CompletedProcess(["systemctl", "--user"], 3)
+        with contextlib.redirect_stderr(err), \
+             mock.patch.object(trailblazer.subprocess, "run", return_value=inactive), \
+             mock.patch.object(trailblazer.subprocess, "Popen",
+                               side_effect=OSError("inotifywait missing")), \
+             mock.patch.object(index, "sync", side_effect=RuntimeError("qdrant down")), \
+             mock.patch.object(sys, "argv", ["scout.py", "-C", str(self.repo), "-q", "head bob"]):
+            with self.assertRaises(SystemExit) as caught:
+                scout.main()
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn("no index source could answer", err.getvalue())
+        self.assertIn("Trailblazer", err.getvalue())
+        self.assertIn("own index", err.getvalue())
+
+    def test_scout_exits_2_when_the_index_answered_with_no_hits(self):
+        # The index answered (sync succeeded, search returned nothing) and the
+        # question names no code-like symbol, so there are no candidates: a
+        # different situation from having no source at all, so a different
+        # message and exit status.
+        def no_hits(op, body):
+            return (200, []) if op == "search" else watched_answer(op, body)
+
+        url, _server = self.serve(no_hits)
+        self.write_endpoint(url)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), \
+             mock.patch.object(index, "sync", return_value="coll"), \
+             mock.patch.object(index, "search", return_value=[]), \
+             mock.patch.object(sys, "argv",
+                               ["scout.py", "-C", str(self.repo), "-q", "how does this work"]):
+            with self.assertRaises(SystemExit) as caught:
+                scout.main()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("the index answered but found no candidate locations", err.getvalue())
+
+    def test_candidates_with_source_names_which_source_answered(self):
+        url, _server = self.serve()
+        self.write_endpoint(url)
+        text, _appendix, source = scout.candidates_with_source(str(self.repo), "head bob", False)
+        self.assertEqual(source, "trailblazer")
+        self.assertIn("assets/headBob.ts:10-24", text)
+
+        with mock.patch.object(index, "sync", return_value="coll"), \
+             mock.patch.object(index, "search", return_value=[]):
+            text, _appendix, source = scout.candidates_with_source(
+                str(self.repo), "how does this work", False, watched=None)
+        self.assertEqual(source, "index")
+        self.assertEqual(text, "")
+
+        with mock.patch.object(index, "sync", side_effect=RuntimeError("qdrant down")):
+            _text, _appendix, source = scout.candidates_with_source(
+                str(self.repo), "head bob", False, watched=None)
+        self.assertIsNone(source)
 
     # --- index.py's command line ---
 
