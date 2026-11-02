@@ -40,7 +40,12 @@ GRAPH_UNAVAILABLE = "the definition graph is unavailable right now; use Grep ins
 
 # --- Tools ---
 
-def tool_grep(pattern, path=".", output_mode="files_with_matches", context=0, head_limit=0, **kw):
+def tool_grep(pattern, path=".", output_mode="files_with_matches", context=0, head_limit=0,
+              work_dir=None, **kw):
+    # An omitted, empty or relative path must resolve under the -C repository,
+    # not under wherever the ranger process happens to run: rg is given work_dir
+    # as its cwd, so "." and a relative path both land there, while an absolute
+    # path is unaffected by cwd.
     cmd = ["rg", pattern, "--heading", "--color", "never"]
     if output_mode == "files_with_matches":
         cmd.append("--files-with-matches")
@@ -53,7 +58,7 @@ def tool_grep(pattern, path=".", output_mode="files_with_matches", context=0, he
     if path:
         cmd.append(path)
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT)
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT, cwd=work_dir)
         result = out.stdout if out.returncode == 0 else out.stderr
     except subprocess.TimeoutExpired:
         return "Grep timed out"
@@ -62,14 +67,15 @@ def tool_grep(pattern, path=".", output_mode="files_with_matches", context=0, he
     return result[:MAX_TOOL_OUTPUT] or "No matches found"
 
 
-def tool_glob(pattern, directory=".", **kw):
+def tool_glob(pattern, directory=".", work_dir=None, **kw):
+    # Same cwd rule as tool_grep: omitted or relative directory means work_dir.
     cmd = ["rg", "--files", "--glob", pattern,
            "--glob", "!**/node_modules/**", "--glob", "!**/.git/**",
            "--glob", "!**/build/**", "--glob", "!**/dist/**"]
     if directory:
         cmd.append(directory)
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT)
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT, cwd=work_dir)
         result = out.stdout if out.returncode == 0 else out.stderr
     except subprocess.TimeoutExpired:
         return "Glob timed out"
@@ -80,8 +86,11 @@ def tool_glob(pattern, directory=".", **kw):
     return "\n".join(lines) if lines else "No files found"
 
 
-def tool_read(path, offset=1, limit=150, **kw):
+def tool_read(path, offset=1, limit=150, work_dir=None, **kw):
     p = Path(path)
+    if work_dir and not p.is_absolute():
+        # A relative path is under the -C repository, wherever the process runs.
+        p = Path(work_dir) / p
     if not p.exists():
         return f"Error: {path} does not exist"
     if not p.is_file():
@@ -327,12 +336,10 @@ def run_tool(name, args, work_dir, functions=None):
                 break
     if not fn:
         return f"Error: unknown tool '{name}'"
-    if "path" in args and not args["path"]:
-        args["path"] = work_dir
-    if "directory" in args and not args["directory"]:
-        args["directory"] = work_dir
+    # The tools resolve their own paths under work_dir (the graph tools take it
+    # in **kw); no argument is rewritten here.
     try:
-        return fn(**args)
+        return fn(**args, work_dir=work_dir)
     except Exception as e:
         return f"Error executing {name}: {e}"
 
