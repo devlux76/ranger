@@ -268,7 +268,7 @@ def sync(work_dir, verbose=False):
             print(f"ranger index: embedding {len(pending)} chunks from {len(todo)} files", file=sys.stderr)
         # Chunks still owed per file. When a file's last chunk has landed the file
         # goes into the manifest, which is saved as the run proceeds, so a run that
-        # is stopped (to yield the inference lock, say) resumes where it left off.
+        # is interrupted (a crash, or Ctrl-C) resumes where it left off.
         owed = {}
         for rel, _, _, _ in pending:
             owed[rel] = owed.get(rel, 0) + 1
