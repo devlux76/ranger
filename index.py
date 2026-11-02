@@ -25,6 +25,9 @@ import time
 import uuid
 from pathlib import Path
 
+# The skill that is running (scout or ranger share this module); names its messages.
+PROG = Path(sys.argv[0]).stem if Path(sys.argv[0]).stem in ("scout", "ranger") else "ranger"
+
 import httpx
 
 try:
@@ -446,7 +449,7 @@ def main():
                 for h in hits:
                     print(f"{h['score']:.3f}  {h['path']}:{h['start']}-{h['end']}")
                 return
-            print("ranger: trailblazer watches the repo but has no hits for this question "
+            print(f"{PROG}: trailblazer watches the repo but has no hits for this question "
                   "(vectors still building, or its search failed); using ranger's own index",
                   file=sys.stderr)
 

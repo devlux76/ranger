@@ -16,6 +16,8 @@ import argparse
 import sys
 from pathlib import Path
 
+PROG = Path(sys.argv[0]).stem if Path(sys.argv[0]).stem in ("scout", "ranger") else "scout"
+
 UNSET = object()  # "the caller did not ask", so Trailblazer's status is asked once
 
 
@@ -43,7 +45,7 @@ def trailblazer_ready(work_dir):
         _index, trailblazer = skill_modules()
         return trailblazer.ensure_watched(work_dir)
     except Exception as e:
-        print(f"ranger: Trailblazer unavailable ({e})", file=sys.stderr)
+        print(f"{PROG}: Trailblazer unavailable ({e})", file=sys.stderr)
         return None
 
 
@@ -81,7 +83,7 @@ def candidates_with_source(work_dir, query, verbose, watched=UNSET):
         appendix = trailblazer.structure_text(work_dir, hits, query)
     else:
         if watched is not None:
-            print("ranger: trailblazer watches the repo but has no hits for this question "
+            print(f"{PROG}: trailblazer watches the repo but has no hits for this question "
                   "(vectors still building, or its search failed); using ranger's own index",
                   file=sys.stderr)
         try:
