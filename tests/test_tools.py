@@ -8,6 +8,7 @@ unrelated directory, so nothing here depends on where pytest was started.
 """
 
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -88,6 +89,56 @@ class ToolPathTests(ToolTestCase):
 
     def test_run_tool_still_reports_an_unknown_tool(self):
         self.assertIn("unknown tool", ranger.run_tool("Nope", {}, str(self.work)))
+
+
+class GrepAndGlobOutputTests(ToolTestCase):
+    # bug:761165d — a dash-led pattern is a pattern, and rg's exit 2 must not
+    # throw away the matches it printed before reporting an unreadable file.
+
+    def test_a_pattern_starting_with_a_dash_is_matched_literally(self):
+        (self.work / "flags.txt").write_text("plain line\nopts -x enabled\n")
+        out = ranger.tool_grep("-x", path=str(self.work), output_mode="content")
+        self.assertIn("opts -x enabled", out)
+
+    def test_an_unreadable_file_does_not_hide_the_matches(self):
+        if os.geteuid() == 0:
+            self.skipTest("root can read a mode-000 file")
+        (self.work / "good.txt").write_text("needle in good\n")
+        locked = self.work / "locked.txt"
+        locked.write_text("no one reads me\n")
+        locked.chmod(0o000)
+        self.addCleanup(locked.chmod, 0o644)
+        out = ranger.tool_grep("needle", path=str(self.work), output_mode="content")
+        self.assertIn("needle in good", out)
+
+    def test_exit_two_with_stdout_still_returns_the_matches(self):
+        fake = subprocess.CompletedProcess(
+            ["rg"], 2, stdout="hit.txt:1:match here\n",
+            stderr="rg: bad.txt: Permission denied (os error 13)\n")
+        with mock.patch.object(ranger.subprocess, "run", return_value=fake):
+            out = ranger.tool_grep("match", path=str(self.work), output_mode="content")
+        self.assertIn("hit.txt:1:match here", out)
+
+    def test_exit_one_means_no_matches(self):
+        fake = subprocess.CompletedProcess(["rg"], 1, stdout="", stderr="")
+        with mock.patch.object(ranger.subprocess, "run", return_value=fake):
+            out = ranger.tool_grep("nothing", path=str(self.work))
+        self.assertEqual(out, "No matches found")
+
+    def test_glob_keeps_its_files_when_rg_reports_errors(self):
+        fake = subprocess.CompletedProcess(
+            ["rg"], 2, stdout="a.txt\nb.txt\n",
+            stderr="rg: locked.txt: Permission denied (os error 13)\n")
+        with mock.patch.object(ranger.subprocess, "run", return_value=fake):
+            out = ranger.tool_glob("*.txt", directory=str(self.work))
+        self.assertIn("a.txt", out)
+        self.assertIn("b.txt", out)
+
+    def test_glob_exit_one_means_no_files(self):
+        fake = subprocess.CompletedProcess(["rg"], 1, stdout="", stderr="")
+        with mock.patch.object(ranger.subprocess, "run", return_value=fake):
+            out = ranger.tool_glob("*.nope", directory=str(self.work))
+        self.assertEqual(out, "No files found")
 
 
 if __name__ == "__main__":

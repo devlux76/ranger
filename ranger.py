@@ -40,13 +40,33 @@ GRAPH_UNAVAILABLE = "the definition graph is unavailable right now; use Grep ins
 
 # --- Tools ---
 
+def _rg_output(out):
+    """What a finished rg run contributes to the tool's answer.
+
+    exit 0 is the plain answer; exit 1 is rg's own "nothing matched". exit 2
+    means some input could not be read — but rg already printed everything it
+    found on stdout, and that must not be replaced by the error text: the
+    matches are what the caller asked for, the errors only qualify them.
+    """
+    if out.returncode == 0:
+        return out.stdout
+    if out.returncode == 1:
+        return ""
+    if out.stdout:
+        errors = out.stderr.strip()
+        note = f"\n... ({errors.splitlines()[0][:200]})" if errors else ""
+        return out.stdout.rstrip("\n") + note
+    return out.stderr
+
+
 def tool_grep(pattern, path=".", output_mode="files_with_matches", context=0, head_limit=0,
               work_dir=None, **kw):
     # An omitted, empty or relative path must resolve under the -C repository,
     # not under wherever the ranger process happens to run: rg is given work_dir
     # as its cwd, so "." and a relative path both land there, while an absolute
-    # path is unaffected by cwd.
-    cmd = ["rg", pattern, "--heading", "--color", "never"]
+    # path is unaffected by cwd. -e keeps a dash-led pattern from being read as
+    # an rg flag.
+    cmd = ["rg", "-e", pattern, "--heading", "--color", "never"]
     if output_mode == "files_with_matches":
         cmd.append("--files-with-matches")
     elif output_mode == "content":
@@ -59,7 +79,7 @@ def tool_grep(pattern, path=".", output_mode="files_with_matches", context=0, he
         cmd.append(path)
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT, cwd=work_dir)
-        result = out.stdout if out.returncode == 0 else out.stderr
+        result = _rg_output(out)
     except subprocess.TimeoutExpired:
         return "Grep timed out"
     if head_limit:
@@ -76,7 +96,7 @@ def tool_glob(pattern, directory=".", work_dir=None, **kw):
         cmd.append(directory)
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT, cwd=work_dir)
-        result = out.stdout if out.returncode == 0 else out.stderr
+        result = _rg_output(out)
     except subprocess.TimeoutExpired:
         return "Glob timed out"
     lines = result.splitlines()
