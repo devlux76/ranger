@@ -143,12 +143,19 @@ def start_service():
     except OSError as e:
         print(f"ranger: cannot wait for Trailblazer ({e}); not starting it", file=sys.stderr)
         return False
+    setup = []
     for line in waiter.stderr:
+        setup.append(line)
         if "Watches established" in line:
             break
     else:
         waiter.wait()
-        print("ranger: cannot wait for Trailblazer (inotifywait gave up); not starting it", file=sys.stderr)
+        # inotifywait's own words first: "Too many open files" is the host's
+        # inotify instance limit, and only the operator can raise it.
+        detail = "".join(setup).strip() or "inotifywait said nothing"
+        print(f"ranger: cannot wait for Trailblazer (inotifywait could not set up its watches: "
+              f"{detail}); not starting it; raise fs.inotify.max_user_instances if it ran out",
+              file=sys.stderr)
         return False
     print("ranger: starting Trailblazer", file=sys.stderr)
     started = subprocess.run(["systemctl", "--user", "start", SERVICE])
