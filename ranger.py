@@ -107,6 +107,10 @@ def tool_glob(pattern, directory=".", work_dir=None, **kw):
 
 
 def tool_read(path, offset=1, limit=150, work_dir=None, **kw):
+    if offset < 1:
+        # A line range starts at 1: 0 or a negative offset is the first line,
+        # never "0|..." and never a range wrapping around the end of the file.
+        offset = 1
     p = Path(path)
     if work_dir and not p.is_absolute():
         # A relative path is under the -C repository, wherever the process runs.
