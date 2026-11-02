@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""ranger — codebase exploration via LFM2.5-2.6B on a local llama-server.
+"""ranger — codebase exploration via LFM3-1.7B on a local llama-server.
 
-Delegates code search to a local LFM2.5 model. Asks for candidate locations
+Delegates code search to a local LFM3 model. Asks for candidate locations
 first — from Trailblazer's definition graph and vectors when it watches the
 repository, otherwise from ranger's own semantic index (index.py) — then lets
 the model verify them with Grep/Glob/Read through the OpenAI-compatible endpoint
@@ -30,7 +30,7 @@ from mini_ranger import UNSET, index_candidates, skill_modules, trailblazer_read
 # Mirai's llama.cpp router (user service mirai-llama-router): one copy of each
 # model in memory, shared with her agent.
 SERVER_URL = "http://127.0.0.1:8094"
-MODEL = "lfm2.5-2.6b:q4"
+MODEL = "lfm3-1.7b:q8"
 MAX_TURNS = 100
 TOOL_TIMEOUT = 10
 MAX_TOOL_OUTPUT = 8000
@@ -371,7 +371,7 @@ def run_tool(name, args, work_dir, functions=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Explore a codebase using local LFM2.5")
+    parser = argparse.ArgumentParser(description="Explore a codebase using local LFM3")
     parser.add_argument("-C", "--directory", default=".", help="Repository directory")
     parser.add_argument("-q", "--query", required=True, help="Question about the codebase")
     parser.add_argument("--max-turns", type=int, default=MAX_TURNS, help="Max exploration turns")

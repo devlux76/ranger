@@ -1,12 +1,12 @@
 ---
 name: ranger
-description: A local LFM2.5-2.6B model that answers deeper questions about a codebase - how something works, why it breaks, what a change affects - by taking mini-ranger's candidate locations and graph, reranking them and verifying with Grep/Glob/Read (plus Trailblazer's Where/Uses), and reporting file paths and line numbers. Use when mini-ranger's locations alone do not answer the question. Saves token costs by offloading analysis to free local inference.
+description: A local LFM3-1.7B model that answers deeper questions about a codebase - how something works, why it breaks, what a change affects - by taking mini-ranger's candidate locations and graph, reranking them and verifying with Grep/Glob/Read (plus Trailblazer's Where/Uses), and reporting file paths and line numbers. Use when mini-ranger's locations alone do not answer the question. Saves token costs by offloading analysis to free local inference.
 allowed-tools: Bash(python3 *ranger/ranger.py*)
 ---
 
 # ranger
 
-A local LFM2.5-2.6B model analyses the codebase on your behalf. It starts from mini-ranger's output — candidate locations and the code graph, from Trailblazer when it watches the repo or from ranger's own index otherwise — reranks and verifies them with Grep/Glob/Read, and reports back its findings: file paths, line numbers, and a short summary. **Run mini-ranger first; use ranger when the locations alone do not answer the question.**
+A local LFM3-1.7B model analyses the codebase on your behalf. It starts from mini-ranger's output — candidate locations and the code graph, from Trailblazer when it watches the repo or from ranger's own index otherwise — reranks and verifies them with Grep/Glob/Read, and reports back its findings: file paths, line numbers, and a short summary. **Run mini-ranger first; use ranger when the locations alone do not answer the question.**
 
 ## When to use
 
