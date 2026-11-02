@@ -318,8 +318,10 @@ def parse_tool_calls_from_content(content):
         return []
     raw = match.group(1)
     calls = []
-    for part in re.split(r"\)\s*,\s*(?=[A-Z])", raw):
-        part = part.strip().rstrip(")")
+    # Split between calls on ", " after a ")" — the ")" stays with the call it
+    # closes, so each part is a whole "Name(args)" for the match below.
+    for part in re.split(r"(?<=\))\s*,\s*(?=[A-Z])", raw):
+        part = part.strip()
         if not part:
             continue
         m = re.match(r"(\w+)\((.*)\)", part, re.DOTALL)
