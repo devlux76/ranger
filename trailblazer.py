@@ -203,10 +203,18 @@ def node_line(node):
 
 
 def edge_line(edge):
-    """One use as 'path:line qualified (kind[, uncertain])'."""
+    """One use as 'path:line qualified (kind[, uncertain][, provenance])'.
+
+    Provenance says how the graph inferred an edge it could not resolve
+    directly, e.g. Trailblazer's 'default_module' for a call through an
+    injected module (`mod(st, :workspace, Workspace)`); it is kept so such an
+    edge is never read as a definite call."""
     kind = edge.get("kind") or "uses"
     if edge.get("uncertain"):
         kind += ", uncertain"
+    provenance = edge.get("provenance")
+    if isinstance(provenance, str) and provenance.strip():
+        kind += ", " + provenance.strip().replace("_", " ")
     return f"{edge.get('node', {}).get('path')}:{edge.get('line')} {edge.get('node', {}).get('qualified')} ({kind})"
 
 

@@ -271,6 +271,27 @@ class TrailblazerClientTests(unittest.TestCase):
         self.assertIn("assets/stepBob.ts:42", text)
         self.assertIn("uncertain", text)
 
+    def test_an_edge_keeps_its_uncertainty_and_provenance(self):
+        edge = {"node": STEP_BOB, "kind": "calls", "line": 42,
+                "uncertain": True, "provenance": "default_module"}
+        self.assertEqual(trailblazer.edge_line(edge),
+                         "assets/stepBob.ts:42 stepBob (calls, uncertain, default module)")
+
+    def test_an_edge_without_provenance_renders_as_before(self):
+        self.assertEqual(trailblazer.edge_line(USES_RESULT[0]),
+                         "assets/stepBob.ts:42 stepBob (calls, uncertain)")
+        self.assertEqual(trailblazer.edge_line(USES_RESULT[1]),
+                         "assets/headBob.ts:18 bobOffset (references)")
+
+    def test_structure_text_preserves_provenance_from_the_graph(self):
+        uses = [dict(USES_RESULT[0], provenance="default_module")]
+        url, _server = self.serve(lambda op, body: (200, uses) if op == "uses"
+                                  else watched_answer(op, body))
+        self.write_endpoint(url)
+        hits = trailblazer.search_hits(self.repo, "head bob")
+        text = trailblazer.structure_text(self.repo, hits, "head bob")
+        self.assertIn("(calls, uncertain, default module)", text)
+
     def test_structure_text_reports_named_symbols(self):
         url, _server = self.serve()
         self.write_endpoint(url)

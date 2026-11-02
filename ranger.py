@@ -215,7 +215,7 @@ GRAPH_TOOL_DEFS = [
         "type": "function",
         "function": {
             "name": "Uses",
-            "description": "Ask the repository's definition graph every definition that uses a name, as path:line qualified (kind), where kind is calls, references, imports, tests or aliases, marked 'uncertain' when the graph could not settle which definition the reference means. Use it before calling two similarly named symbols related or independent.",
+            "description": "Ask the repository's definition graph every definition that uses a name, as path:line qualified (kind), where kind is calls, references, imports, tests or aliases, marked 'uncertain' when the graph could not settle which definition the reference means, followed by how it was inferred when the graph says (e.g. 'default module': a call through an injected module). Use it before calling two similarly named symbols related or independent.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -265,7 +265,7 @@ def build_system_prompt(work_dir, graph_tools=False):
         "- The repository has a definition graph: Where NAME says where a name is declared "
         "(path:start-end) and Uses NAME lists every definition that uses it with its line and "
         "the kind of use. Prefer those over Grep for 'where is X defined' and 'what uses X'; "
-        "check an edge marked uncertain before relying on it.\n"
+        "check an edge marked uncertain before relying on it, and report its qualifier with it.\n"
         if graph_tools else ""
     )
     return (
