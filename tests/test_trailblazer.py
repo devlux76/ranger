@@ -25,7 +25,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 import index           # noqa: E402
-import mini_ranger     # noqa: E402
+import scout     # noqa: E402
 import ranger          # noqa: E402
 import trailblazer     # noqa: E402
 
@@ -585,22 +585,22 @@ class TrailblazerClientTests(unittest.TestCase):
             hits = trailblazer.search_hits(str(self.repo), "head bob")
         self.assertIn("assets/headBob.ts", [h["path"] for h in hits])
 
-    # --- mini_ranger.py's command line: retrieval only, no model ---
+    # --- scout.py's command line: retrieval only, no model ---
 
-    def test_mini_ranger_prints_candidates_and_structure_without_a_model(self):
+    def test_scout_prints_candidates_and_structure_without_a_model(self):
         url, _server = self.serve()
         self.write_endpoint(url)
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.no_systemctl(), \
              mock.patch.object(index, "sync", exploding_sync), \
              mock.patch.object(ranger, "call_model", side_effect=AssertionError("no model")), \
-             mock.patch.object(sys, "argv", ["mini_ranger.py", "-C", str(self.repo), "-q", "head bob"]):
-            mini_ranger.main()
+             mock.patch.object(sys, "argv", ["scout.py", "-C", str(self.repo), "-q", "head bob"]):
+            scout.main()
         self.assertIn("--- candidates, best match first ---", out.getvalue())
         self.assertIn("assets/headBob.ts:10-24", out.getvalue())
         self.assertIn("--- structure ---", out.getvalue())
 
-    def test_mini_ranger_exits_1_when_no_index_source_can_answer(self):
+    def test_scout_exits_1_when_no_index_source_can_answer(self):
         # No endpoint file, so Trailblazer cannot watch; ranger's own index
         # raises, so it cannot answer either: nothing could answer, and the
         # message must say that rather than claiming two false facts.
@@ -611,15 +611,15 @@ class TrailblazerClientTests(unittest.TestCase):
              mock.patch.object(trailblazer.subprocess, "Popen",
                                side_effect=OSError("inotifywait missing")), \
              mock.patch.object(index, "sync", side_effect=RuntimeError("qdrant down")), \
-             mock.patch.object(sys, "argv", ["mini_ranger.py", "-C", str(self.repo), "-q", "head bob"]):
+             mock.patch.object(sys, "argv", ["scout.py", "-C", str(self.repo), "-q", "head bob"]):
             with self.assertRaises(SystemExit) as caught:
-                mini_ranger.main()
+                scout.main()
         self.assertEqual(caught.exception.code, 1)
         self.assertIn("no index source could answer", err.getvalue())
         self.assertIn("Trailblazer", err.getvalue())
         self.assertIn("own index", err.getvalue())
 
-    def test_mini_ranger_exits_2_when_the_index_answered_with_no_hits(self):
+    def test_scout_exits_2_when_the_index_answered_with_no_hits(self):
         # The index answered (sync succeeded, search returned nothing) and the
         # question names no code-like symbol, so there are no candidates: a
         # different situation from having no source at all, so a different
@@ -634,28 +634,28 @@ class TrailblazerClientTests(unittest.TestCase):
              mock.patch.object(index, "sync", return_value="coll"), \
              mock.patch.object(index, "search", return_value=[]), \
              mock.patch.object(sys, "argv",
-                               ["mini_ranger.py", "-C", str(self.repo), "-q", "how does this work"]):
+                               ["scout.py", "-C", str(self.repo), "-q", "how does this work"]):
             with self.assertRaises(SystemExit) as caught:
-                mini_ranger.main()
+                scout.main()
         self.assertEqual(caught.exception.code, 2)
         self.assertIn("the index answered but found no candidate locations", err.getvalue())
 
     def test_candidates_with_source_names_which_source_answered(self):
         url, _server = self.serve()
         self.write_endpoint(url)
-        text, _appendix, source = mini_ranger.candidates_with_source(str(self.repo), "head bob", False)
+        text, _appendix, source = scout.candidates_with_source(str(self.repo), "head bob", False)
         self.assertEqual(source, "trailblazer")
         self.assertIn("assets/headBob.ts:10-24", text)
 
         with mock.patch.object(index, "sync", return_value="coll"), \
              mock.patch.object(index, "search", return_value=[]):
-            text, _appendix, source = mini_ranger.candidates_with_source(
+            text, _appendix, source = scout.candidates_with_source(
                 str(self.repo), "how does this work", False, watched=None)
         self.assertEqual(source, "index")
         self.assertEqual(text, "")
 
         with mock.patch.object(index, "sync", side_effect=RuntimeError("qdrant down")):
-            _text, _appendix, source = mini_ranger.candidates_with_source(
+            _text, _appendix, source = scout.candidates_with_source(
                 str(self.repo), "head bob", False, watched=None)
         self.assertIsNone(source)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mini-ranger — retrieval only: candidate locations and the code graph for a question.
+"""scout — retrieval only: candidate locations and the code graph for a question.
 
 No model runs here. Candidates come from Trailblazer's definition graph and
 vectors when it watches the repository, otherwise from ranger's own semantic
@@ -8,8 +8,8 @@ graph around the best hits. ranger.py hands the same output to its model to
 rerank and analyse.
 
 Usage:
-    python3 mini_ranger.py -C <repo> -q "<question>"
-    python3 mini_ranger.py -C <repo> -q "<question>" --verbose
+    python3 scout.py -C <repo> -q "<question>"
+    python3 scout.py -C <repo> -q "<question>" --verbose
 """
 
 import argparse

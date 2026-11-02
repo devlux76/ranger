@@ -29,7 +29,7 @@ import httpx
 
 try:
     import trailblazer
-except ImportError:  # mini-ranger ships index.py without the client
+except ImportError:  # scout ships index.py without the client
     trailblazer = None
 
 EMBED_URL = "http://127.0.0.1:8091/v1/embeddings"

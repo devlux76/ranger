@@ -25,7 +25,7 @@ from pathlib import Path
 import httpx
 
 # The retrieval layer: candidate locations and the graph, no model.
-from mini_ranger import UNSET, index_candidates, skill_modules, trailblazer_ready, trailblazer_status  # noqa: F401
+from scout import UNSET, index_candidates, skill_modules, trailblazer_ready, trailblazer_status  # noqa: F401
 
 # Mirai's llama.cpp router (user service mirai-llama-router): one copy of each
 # model in memory, shared with her agent.
