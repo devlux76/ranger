@@ -19,7 +19,11 @@ python3 @SKILL_DIR@/mini_ranger.py -C <repo> -q "<question>" --verbose   # sourc
 - **Its own index otherwise.** EmbeddingGemma 2 embeddings in a local Qdrant (honours `.gitignore`); only changed files are re-embedded, but the first run on a new repo embeds everything, which takes a while (sojourney, 160 files: about 30 minutes). The same happens while Trailblazer's vectors for a newly watched repo are still being built.
 - **Exact names.** Symbols named in the question are also found with ripgrep.
 
-Exit status 1 with a message means no index could answer.
+Exit status:
+
+- 0: candidates printed.
+- 1: no index source could answer (Trailblazer not watching or unavailable and ranger's own index could not answer).
+- 2: a source answered but found no candidate locations for the question.
 
 ## Services
 
