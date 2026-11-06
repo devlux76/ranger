@@ -546,6 +546,65 @@ class TrailblazerClientTests(unittest.TestCase):
         self.assertIn("assets/headBob.ts:10-24", out.getvalue())
         self.assertIn("--- structure ---", out.getvalue())
 
+    def test_mini_ranger_exits_1_when_no_index_source_can_answer(self):
+        # No endpoint file, so Trailblazer cannot watch; ranger's own index
+        # raises, so it cannot answer either: nothing could answer, and the
+        # message must say that rather than claiming two false facts.
+        err = io.StringIO()
+        inactive = subprocess.CompletedProcess(["systemctl", "--user"], 3)
+        with contextlib.redirect_stderr(err), \
+             mock.patch.object(trailblazer.subprocess, "run", return_value=inactive), \
+             mock.patch.object(trailblazer.subprocess, "Popen",
+                               side_effect=OSError("inotifywait missing")), \
+             mock.patch.object(index, "sync", side_effect=RuntimeError("qdrant down")), \
+             mock.patch.object(sys, "argv", ["mini_ranger.py", "-C", str(self.repo), "-q", "head bob"]):
+            with self.assertRaises(SystemExit) as caught:
+                mini_ranger.main()
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn("no index source could answer", err.getvalue())
+        self.assertIn("Trailblazer", err.getvalue())
+        self.assertIn("own index", err.getvalue())
+
+    def test_mini_ranger_exits_2_when_the_index_answered_with_no_hits(self):
+        # The index answered (sync succeeded, search returned nothing) and the
+        # question names no code-like symbol, so there are no candidates: a
+        # different situation from having no source at all, so a different
+        # message and exit status.
+        def no_hits(op, body):
+            return (200, []) if op == "search" else watched_answer(op, body)
+
+        url, _server = self.serve(no_hits)
+        self.write_endpoint(url)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), \
+             mock.patch.object(index, "sync", return_value="coll"), \
+             mock.patch.object(index, "search", return_value=[]), \
+             mock.patch.object(sys, "argv",
+                               ["mini_ranger.py", "-C", str(self.repo), "-q", "how does this work"]):
+            with self.assertRaises(SystemExit) as caught:
+                mini_ranger.main()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("the index answered but found no candidate locations", err.getvalue())
+
+    def test_candidates_with_source_names_which_source_answered(self):
+        url, _server = self.serve()
+        self.write_endpoint(url)
+        text, _appendix, source = mini_ranger.candidates_with_source(str(self.repo), "head bob", False)
+        self.assertEqual(source, "trailblazer")
+        self.assertIn("assets/headBob.ts:10-24", text)
+
+        with mock.patch.object(index, "sync", return_value="coll"), \
+             mock.patch.object(index, "search", return_value=[]):
+            text, _appendix, source = mini_ranger.candidates_with_source(
+                str(self.repo), "how does this work", False, watched=None)
+        self.assertEqual(source, "index")
+        self.assertEqual(text, "")
+
+        with mock.patch.object(index, "sync", side_effect=RuntimeError("qdrant down")):
+            _text, _appendix, source = mini_ranger.candidates_with_source(
+                str(self.repo), "head bob", False, watched=None)
+        self.assertIsNone(source)
+
     # --- index.py's command line ---
 
     def run_index_cli(self, *argv):
