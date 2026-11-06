@@ -155,6 +155,25 @@ def exploding_sync(*args, **kwargs):
     raise AssertionError("index.sync must not run when Trailblazer watches the repo")
 
 
+class FakeWaiter:
+    """Stands in for the inotifywait process: stderr lines, then an exit code.
+
+    The waiter is what start_service() watches for "Watches established", so a
+    fake yields that line (or fails before it) and wait() returns at once: no
+    real inotify, no real backstop sleep, whatever the host's limits allow."""
+
+    def __init__(self, lines, wait_code=0):
+        self.stderr = iter(lines)
+        self.wait_code = wait_code
+        self.killed = False
+
+    def wait(self):
+        return self.wait_code
+
+    def kill(self):
+        self.killed = True
+
+
 class TrailblazerClientTests(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
@@ -491,6 +510,8 @@ class TrailblazerClientTests(unittest.TestCase):
     def test_ensure_watched_starts_a_stopped_service_on_its_endpoint_event(self):
         # The service publishes endpoint.json by rename once its API listens; the
         # wait is on that event, so the status asked right after it is answered.
+        # The waiter itself is faked: no real inotifywait, so the test passes
+        # whatever the host's inotify instance limit allows.
         url, server = self.serve()
         runs = []
 
@@ -503,7 +524,9 @@ class TrailblazerClientTests(unittest.TestCase):
             temp.rename(self.state / "endpoint.json")
             return subprocess.CompletedProcess(argv, 0)
 
+        waiter = FakeWaiter(["Setting up watches.\n", "Watches established.\n"], wait_code=0)
         with mock.patch.object(trailblazer.subprocess, "run", systemctl), \
+             mock.patch.object(trailblazer.subprocess, "Popen", lambda *a, **k: waiter), \
              contextlib.redirect_stderr(io.StringIO()):
             status = trailblazer.ensure_watched(str(self.repo))
         self.assertEqual([argv[2] for argv in runs], ["is-active", "start"])
@@ -511,14 +534,41 @@ class TrailblazerClientTests(unittest.TestCase):
         self.assertEqual([op for op, _ in server.calls], ["status"])
 
     def test_a_start_that_publishes_nothing_fires_the_backstop(self):
+        # The backstop is faked too: the waiter's wait() returns nonzero at once
+        # instead of blocking for the real START_BACKSTOP_S.
         def systemctl(argv, **kw):
             return subprocess.CompletedProcess(argv, 3 if argv[2] == "is-active" else 0)
 
+        waiter = FakeWaiter(["Setting up watches.\n", "Watches established.\n"], wait_code=1)
         with mock.patch.object(trailblazer.subprocess, "run", systemctl), \
+             mock.patch.object(trailblazer.subprocess, "Popen", lambda *a, **k: waiter), \
              mock.patch.object(trailblazer, "START_BACKSTOP_S", 1), \
              contextlib.redirect_stderr(io.StringIO()) as err:
             self.assertIsNone(trailblazer.ensure_watched(str(self.repo)))
         self.assertIn("anomaly", err.getvalue())
+
+    def test_a_waiter_that_cannot_set_up_says_why_and_does_not_start(self):
+        # inotifywait gives up when its instances are exhausted: its own stderr
+        # must reach the operator, with the limit to raise, and the service
+        # stays stopped — the operator decides, not the script.
+        runs = []
+
+        def systemctl(argv, **kw):
+            runs.append(argv)
+            return subprocess.CompletedProcess(argv, 3 if argv[2] == "is-active" else 0)
+
+        waiter = FakeWaiter(["Setting up watches.\n",
+                             "Couldn't initialize inotify: Too many open files\n"],
+                            wait_code=1)
+        with mock.patch.object(trailblazer.subprocess, "run", systemctl), \
+             mock.patch.object(trailblazer.subprocess, "Popen", lambda *a, **k: waiter), \
+             contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertFalse(trailblazer.start_service())
+            self.assertIsNone(trailblazer.ensure_watched(str(self.repo)))
+        message = err.getvalue()
+        self.assertIn("Couldn't initialize inotify: Too many open files", message)
+        self.assertIn("fs.inotify.max_user_instances", message)
+        self.assertEqual([argv[2] for argv in runs], ["is-active", "is-active"])  # never started
 
     def test_a_search_slowed_by_indexing_still_answers(self):
         # Trailblazer's own embedding backlog delays a search past the plain
