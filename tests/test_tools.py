@@ -141,5 +141,23 @@ class GrepAndGlobOutputTests(ToolTestCase):
         self.assertEqual(out, "No files found")
 
 
+class ReadOffsetTests(ToolTestCase):
+    # bug:c2fd4a1 — an offset below 1 behaves as offset 1: line 1 is "1|",
+    # never "0|" and never a wrapped negative range.
+
+    def setUp(self):
+        super().setUp()
+        self.ten = self.work / "ten.txt"
+        self.ten.write_text("".join(f"line {n}\n" for n in range(1, 11)))
+
+    def test_offset_zero_reads_from_line_one(self):
+        out = ranger.tool_read(str(self.ten), offset=0, limit=3)
+        self.assertEqual(out, "1|line 1\n2|line 2\n3|line 3\n... (7 more lines)")
+
+    def test_a_negative_offset_reads_from_line_one(self):
+        out = ranger.tool_read(str(self.ten), offset=-4, limit=2)
+        self.assertEqual(out, "1|line 1\n2|line 2\n... (8 more lines)")
+
+
 if __name__ == "__main__":
     unittest.main()
