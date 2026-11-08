@@ -6,7 +6,7 @@ allowed-tools: Bash(python3 *ranger/ranger.py*)
 
 # ranger
 
-A local LFM3-1.7B model analyses the codebase on your behalf. It starts from scout's output — candidate locations and the code graph, from Trailblazer when it watches the repo or from ranger's own index otherwise — reranks and verifies them with Grep/Glob/Read, and reports back its findings: file paths, line numbers, and a short summary. **Run scout first; use ranger when the locations alone do not answer the question.**
+A local LFM3-1.7B model analyses the codebase on your behalf. It starts from scout's output — candidate locations and the code graph, from Trailblazer, which must watch the repo — reranks and verifies them with Grep/Glob/Read, and reports back its findings: file paths, line numbers, and a short summary. **Run scout first; use ranger when the locations alone do not answer the question.**
 
 ## When to use
 
@@ -39,19 +39,18 @@ python3 @SKILL_DIR@/ranger.py -C <repo> -q "<question>" --max-turns 20
 
 ## What to expect
 
-- **Retrieval is scout's.** The candidates and graph are exactly what `scout.py` prints (see the scout skill): Trailblazer's graph and vectors when it watches the repo — started, and asked to watch, when needed — otherwise ranger's own index. With `--verbose` the line `candidates from trailblazer` or `candidates from index` says which.
+- **Retrieval is scout's.** The candidates and graph are exactly what `scout.py` prints (see the scout skill): Trailblazer's graph and vectors only, started and asked to watch the repo when needed. If Trailblazer cannot answer, scout prints a hint (`trailblazer watch <repo>`) and ranger has no candidates to start from. With `--verbose` the line `candidates from trailblazer` says which source answered.
 - **Graph tools.** Where Trailblazer watches the repo the model also gets `Where` (where a name is declared) and `Uses` (every definition that uses it), which are exact where Grep is not.
 - **Time per question** (measured 2026-10-03, CPU only, 6 threads): roughly 2 to 7 minutes; 3 of 3 test questions answered correctly with file and line.
 
-The model runs on Mirai's local CPU llama.cpp router (`http://127.0.0.1:8094`, user service `mirai-llama-router`), which holds one copy of each model for her agent and for this skill — no API costs, no network calls, no GPU. Output is whatever the model says when it finishes exploring (typically a summary with file paths and line numbers). If it cannot connect: `systemctl --user status mirai-llama-router ranger-embed` and `docker ps` (Qdrant runs as the `ranger-qdrant` container).
+The model runs on Mirai's local CPU llama.cpp router (`http://127.0.0.1:8094`, user service `mirai-llama-router`), which holds one copy of each model for her agent and for this skill — no API costs, no network calls, no GPU. Output is whatever the model says when it finishes exploring (typically a summary with file paths and line numbers). If it cannot connect: `systemctl --user status mirai-llama-router trailblazer`.
 
 ## Do not repair this skill
 
 Working as of 2026-10-22. It does not use ollama (there is none). If a run fails, do not edit `ranger.py`, `index.py`, `trailblazer.py`, the model names or the services; start what is down and retry:
 
 ```bash
-systemctl --user start mirai-llama-router ranger-embed   # model router on 8094, embeddings on 8091
-docker start ranger-qdrant                                        # index store on 6333
+systemctl --user start mirai-llama-router   # model router on 8094
 systemctl --user start trailblazer                                  # the code graph (ranger starts it itself when it is stopped)
 ```
 

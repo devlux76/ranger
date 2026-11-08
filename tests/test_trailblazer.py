@@ -22,7 +22,6 @@ from unittest import mock
 REPO = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(REPO)]; sys.path.append(str(Path.home() / "projects" / "scout"))  # scout: canonical source
 
-import index           # noqa: E402
 import scout     # noqa: E402
 import ranger          # noqa: E402
 import trailblazer     # noqa: E402
@@ -149,10 +148,6 @@ def matches(qualified, asked):
     return qualified == asked or qualified.split(".")[-1] == asked
 
 
-def exploding_sync(*args, **kwargs):
-    raise AssertionError("index.sync must not run when Trailblazer watches the repo")
-
-
 class TrailblazerClientTests(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
@@ -248,7 +243,6 @@ class TrailblazerClientTests(unittest.TestCase):
         self.write_endpoint(url)
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.no_systemctl(), \
-             mock.patch.object(index, "sync", exploding_sync), \
              mock.patch.object(ranger, "call_model", side_effect=AssertionError("no model")), \
              mock.patch.object(sys, "argv", ["scout.py", "-C", str(self.repo), "-q", "head bob"]):
             scout.main()

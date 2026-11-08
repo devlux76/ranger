@@ -2,11 +2,10 @@
 """ranger — codebase exploration via LFM3-1.7B on a local llama-server.
 
 Delegates code search to a local LFM3 model. Asks for candidate locations
-first — from Trailblazer's definition graph and vectors when it watches the
-repository, otherwise from ranger's own semantic index (index.py) — then lets
-the model verify them with Grep/Glob/Read through the OpenAI-compatible endpoint
-and its native tool calling. Returns whatever the model says when it stops
-calling tools.
+first — from Trailblazer's definition graph and vectors, for a repository it
+watches (scout exits 1 with a hint otherwise) — then lets the model verify them
+with Grep/Glob/Read through the OpenAI-compatible endpoint and its native tool
+calling. Returns whatever the model says when it stops calling tools.
 
 Usage:
     python3 ranger.py -C <repo> -q "<question>"
