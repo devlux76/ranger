@@ -24,7 +24,10 @@ from pathlib import Path
 
 import httpx
 
-# The retrieval layer: candidate locations and the graph, no model.
+# The retrieval layer: candidate locations and the graph, no model. Scout's canonical
+# source is ~/projects/scout (install.sh's SCOUT_SRC); an installed skill dir keeps its
+# own copies beside this file and those win, since sys.path[0] is this directory.
+sys.path.append(str(Path.home() / "projects" / "scout"))
 from scout import UNSET, index_candidates, skill_modules, trailblazer_ready, trailblazer_status  # noqa: F401
 
 # Mirai's llama.cpp router (user service mirai-llama-router): one copy of each

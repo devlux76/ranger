@@ -22,7 +22,7 @@ from typing import cast
 from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
+sys.path[:0] = [str(REPO)]; sys.path.append(str(Path.home() / "projects" / "scout"))  # scout: canonical source
 
 import index           # noqa: E402
 import scout     # noqa: E402
